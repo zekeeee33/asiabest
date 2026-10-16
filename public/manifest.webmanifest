@@ -1,0 +1,17 @@
+{
+  "name": "Asia Best Construction and Development Corporation Equipment Tracker",
+  "short_name": "ABCD Equipment",
+  "description": "Construction equipment and materials inventory for field teams.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f7f9",
+  "theme_color": "#152b43",
+  "icons": [
+    {
+      "src": "/forge.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
