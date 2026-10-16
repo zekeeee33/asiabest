@@ -6,7 +6,9 @@ The Equipment Tracker is a mobile-responsive construction inventory application 
 
 1. Install Node.js 20.19+ or 22.12+ and npm.
 2. Run `npm install`.
-3. Create a Supabase project and apply the SQL in `supabase/migrations/202610160001_initial_inventory.sql` in the Supabase SQL editor. For CLI use, run `supabase init` once, then `supabase link --project-ref <project-ref>` and `supabase db push`.
+3. Create a Supabase project and apply the SQL migrations in `supabase/migrations/` in filename order in the Supabase SQL editor. For CLI use, run `supabase init` once, then `supabase link --project-ref <project-ref>` and `supabase db push`.
+
+   If the initial migration was already applied before later changes, apply each unapplied migration in order. In particular, `202610160002_inventory_transaction_quantity_snapshots.sql` adds the missing nullable movement quantity snapshots, and `202610160003_borrower_checkout.sql` adds optional borrower contact and the checkout flow that does not require a project/site. These are incremental and preserve existing records.
 4. Copy `.env.example` to `.env.local`, then set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to the project URL and **publishable/anon** key. Never use a service-role key in the browser.
 5. Start the app with `npm run dev`. Camera access requires HTTPS, except on `localhost`.
 6. Create users through Supabase Auth. New users receive the least-privileged `viewer_auditor` role by default. Promote the first administrator from the trusted SQL editor, replacing the email:
@@ -24,7 +26,8 @@ The Equipment Tracker is a mobile-responsive construction inventory application 
 - Supabase Auth sign-in and role-scoped inventory reads.
 - Inventory registration for individual assets and bulk stock, with an immediate per-record QR label preview/print flow; table search/status filtering and CSV export.
 - Rear-camera QR scanning with manual asset-tag fallback; camera access is requested only on the scanner screen.
-- Transactional equipment checkout/return, stock receipt/issue/adjustment, pending inter-location asset transfer/receipt, and maintenance status functions.
+- Transactional equipment checkout/return with borrower name and optional contact (no project/site required at checkout), camera QR selection for checkout and return, stock receipt/issue/adjustment, pending inter-location asset transfer/receipt, and maintenance status functions.
+- Inventory shows the current borrower for checked-out assets; return condition controls whether equipment becomes available or remains marked damaged.
 - PostgreSQL checks, unique asset tags/serial numbers, active assignment uniqueness, non-negative stock balances, RLS, immutable movement rows, and protected audit history.
 - Dashboard KPIs, location distribution, low-stock counts, and estimated purchase value derived from accessible database records.
 - Installable web manifest and a small same-origin offline shell cache. Database transactions still require a network connection.

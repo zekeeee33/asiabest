@@ -22,6 +22,7 @@ export type InventoryItem = {
   updated_at: string
   location: { name: string } | null
   category: { name: string } | null
+  active_assignment?: { employee_name: string; borrower_contact: string | null; checked_out_at: string } | null
 }
 
 type TableShape<Row, Insert = Partial<Row>, Update = Partial<Insert>> = {
@@ -62,6 +63,7 @@ export type Database = {
       }>
       inventory_transactions: TableShape<{ id: string; item_id: string; action: string; quantity: number; quantity_before: number | null; quantity_after: number | null; employee_name: string | null; notes: string | null; created_at: string; performed_by: string | null }>
       equipment_transfers: TableShape<{ id: string; item_id: string; from_location_id: string; to_location_id: string; receiver_name: string; sent_at: string; status: string }>
+      equipment_assignments: TableShape<{ id: string; item_id: string; employee_name: string; borrower_contact: string | null; checked_out_at: string; returned_at: string | null }>
       maintenance_records: TableShape<{ id: string; item_id: string; issue_description: string; priority: string; status: string; created_at: string }>
       audit_logs: TableShape<{ id: number; actor_id: string | null; action: string; table_name: string; record_id: string; before_value: Json | null; after_value: Json | null; created_at: string }>
     }
@@ -69,6 +71,7 @@ export type Database = {
     Views: Record<string, never>
     Functions: {
       checkout_asset: { Args: { p_item_id: string; p_employee_name: string; p_project_name: string; p_expected_return_at: string | null; p_notes: string | null }; Returns: string }
+      checkout_asset_to_borrower: { Args: { p_item_id: string; p_borrower_name: string; p_borrower_contact: string | null; p_notes: string | null }; Returns: string }
       return_asset: { Args: { p_item_id: string; p_condition: string; p_location_id: string | null; p_notes: string | null }; Returns: string }
       move_stock: { Args: { p_item_id: string; p_quantity: number; p_action: string; p_notes: string | null }; Returns: string }
       start_equipment_transfer: { Args: { p_item_id: string; p_to_location_id: string; p_receiver_name: string; p_notes: string | null }; Returns: string }

@@ -88,7 +88,14 @@ function App() {
       notify({ kind: 'error', text: error.message })
       setItems([])
     } else {
-      setItems((data ?? []) as unknown as InventoryItem[])
+      const inventory = (data ?? []) as unknown as InventoryItem[]
+      const { data: assignments, error: assignmentsError } = await supabase
+        .from('equipment_assignments')
+        .select('item_id, employee_name, borrower_contact, checked_out_at')
+        .is('returned_at', null)
+      if (assignmentsError) notify({ kind: 'error', text: assignmentsError.message })
+      const assignmentByItem = new Map((assignments ?? []).map((assignment) => [assignment.item_id, assignment]))
+      setItems(inventory.map((item) => ({ ...item, active_assignment: assignmentByItem.get(item.id) ?? null })))
     }
     setLoading(false)
   }, [notify])
@@ -359,7 +366,7 @@ function InventoryPage({ items, allItems, loading, search, setSearch, statusFilt
 function InventoryTable({ items, compact = false, onQr, onHistory }: { items: InventoryItem[]; compact?: boolean; onQr?: (item: InventoryItem) => void; onHistory?: (item: InventoryItem) => void }) {
   if (!items.length) return null
   const hasActions = !compact && Boolean(onQr || onHistory)
-  return <div className="table-scroll"><table className="inventory-table"><thead><tr><th>ITEM</th><th>ASSET TAG</th><th>LOCATION</th><th>STATUS</th><th>{compact ? 'UPDATED' : 'QUANTITY'}</th>{hasActions && <th aria-label="Actions" />}</tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><div className="item-cell"><div className={`item-avatar ${item.tracking_type === 'stock' ? 'stock-avatar' : ''}`}>{item.tracking_type === 'stock' ? <Boxes size={16} /> : <Package size={16} />}</div><div><strong>{item.name}</strong><small>{item.category?.name ?? (item.tracking_type === 'stock' ? 'Bulk material' : 'Equipment asset')}</small></div></div></td><td><span className="asset-code">{item.asset_tag ?? '—'}</span></td><td><span className="table-location"><MapPin size={13} />{item.location?.name ?? 'Unassigned'}</span></td><td><StatusBadge status={item.status} /></td><td>{compact ? <span className="date-text">{formatDate(item.updated_at)}</span> : <strong className="quantity-text">{item.tracking_type === 'stock' ? `${Number(item.quantity).toLocaleString()} ${item.unit ?? ''}` : '1 unit'}</strong>}</td>{hasActions && <td className="table-actions">{onQr && <button className="icon-button qr-action" title="Show QR label" onClick={() => onQr(item)}><QrCode size={16} /></button>}{onHistory && <button className="icon-button qr-action" title="View movement history" onClick={() => onHistory(item)}><ClipboardList size={16} /></button>}</td>}</tr>)}</tbody></table></div>
+  return <div className="table-scroll"><table className="inventory-table"><thead><tr><th>ITEM</th><th>ASSET TAG</th><th>LOCATION</th>{!compact && <th>BORROWER</th>}<th>STATUS</th><th>{compact ? 'UPDATED' : 'QUANTITY'}</th>{hasActions && <th aria-label="Actions" />}</tr></thead><tbody>{items.map((item) => <tr key={item.id}><td><div className="item-cell"><div className={`item-avatar ${item.tracking_type === 'stock' ? 'stock-avatar' : ''}`}>{item.tracking_type === 'stock' ? <Boxes size={16} /> : <Package size={16} />}</div><div><strong>{item.name}</strong><small>{item.category?.name ?? (item.tracking_type === 'stock' ? 'Bulk material' : 'Equipment asset')}</small></div></div></td><td><span className="asset-code">{item.asset_tag ?? '—'}</span></td><td><span className="table-location"><MapPin size={13} />{item.location?.name ?? 'Unassigned'}</span></td>{!compact && <td>{item.active_assignment ? <span className="borrower-cell"><strong>{item.active_assignment.employee_name}</strong><small>{item.active_assignment.borrower_contact ?? `Since ${formatDate(item.active_assignment.checked_out_at)}`}</small></span> : <span className="date-text">—</span>}</td>}<td><StatusBadge status={item.status} /></td><td>{compact ? <span className="date-text">{formatDate(item.updated_at)}</span> : <strong className="quantity-text">{item.tracking_type === 'stock' ? `${Number(item.quantity).toLocaleString()} ${item.unit ?? ''}` : '1 unit'}</strong>}</td>{hasActions && <td className="table-actions">{onQr && <button className="icon-button qr-action" title="Show QR label" onClick={() => onQr(item)}><QrCode size={16} /></button>}{onHistory && <button className="icon-button qr-action" title="View movement history" onClick={() => onHistory(item)}><ClipboardList size={16} /></button>}</td>}</tr>)}</tbody></table></div>
 }
 
 type MovementRecord = { id: string; action: string; quantity: number; quantity_before: number | null; quantity_after: number | null; employee_name: string | null; notes: string | null; created_at: string; performed_by: string | null }
@@ -386,6 +393,32 @@ function MovementHistoryModal({ item, onClose }: { item: InventoryItem; onClose:
 function StatusBadge({ status }: { status: InventoryStatus }) {
   const tone = status === 'available' ? 'green' : status === 'assigned' ? 'blue' : status === 'maintenance' || status === 'in_transit' ? 'orange' : status === 'damaged' || status === 'missing' ? 'red' : 'gray'
   return <span className={`status-badge ${tone}`}><i />{statusLabel[status]}</span>
+}
+
+function QrCamera({ id, onScan, onError }: { id: string; onScan: (value: string) => void; onError?: (message: string) => void }) {
+  useEffect(() => {
+    let scanner: import('html5-qrcode').Html5QrcodeScanner | undefined
+    let active = true
+    void import('html5-qrcode').then(({ Html5QrcodeScanner: Scanner }) => {
+      if (!active) return
+      scanner = new Scanner(id, { fps: 10, qrbox: { width: 230, height: 230 }, aspectRatio: 1, videoConstraints: { facingMode: { ideal: 'environment' } }, rememberLastUsedCamera: true, showTorchButtonIfSupported: true }, false)
+      scanner.render((decodedText) => {
+        if (scanner) void scanner.clear()
+        onScan(decodedText)
+      }, (errorMessage) => {
+        if (errorMessage.includes('NotAllowedError') || errorMessage.includes('Permission')) {
+          onError?.('Camera access was denied. Allow camera access in your browser settings.')
+        }
+      })
+    }).catch((error: unknown) => {
+      onError?.(error instanceof Error ? error.message : 'The QR scanner could not be loaded.')
+    })
+    return () => {
+      active = false
+      if (scanner) void scanner.clear().catch((error: unknown) => onError?.(error instanceof Error ? error.message : 'The QR scanner could not be stopped.'))
+    }
+  }, [id, onError, onScan])
+  return <div id={id} className="qr-reader" />
 }
 
 function ScanPage({ onScan, onSearch }: { onScan: (value: string) => void; onSearch: (value: string) => void }) {
@@ -426,8 +459,9 @@ function TransactionsPage({ items, profile, notify, onRefresh }: { items: Invent
   const [selected, setSelected] = useState('')
   const [action, setAction] = useState<'checkout' | 'return' | 'transfer' | 'stock'>('checkout')
   const [employee, setEmployee] = useState('')
-  const [project, setProject] = useState('')
+  const [borrowerContact, setBorrowerContact] = useState('')
   const [destination, setDestination] = useState('')
+  const [scanning, setScanning] = useState(false)
   const [condition, setCondition] = useState('good')
   const [stockAction, setStockAction] = useState<'stock_receipt' | 'stock_issue' | 'stock_adjustment'>('stock_issue')
   const [quantity, setQuantity] = useState('1')
@@ -440,6 +474,36 @@ function TransactionsPage({ items, profile, notify, onRefresh }: { items: Invent
   const assets = items.filter((item) => item.tracking_type === 'asset' && (action === 'return' ? item.status === 'assigned' : item.status === 'available') && (action !== 'transfer' || item.location !== null))
   const stockItems = items.filter((item) => item.tracking_type === 'stock')
   const itemChoices = action === 'stock' ? stockItems : assets
+  const handleQrScan = useCallback((decodedText: string) => {
+    let identifier = decodedText.trim()
+    if (/^https?:\/\//i.test(identifier)) {
+      try {
+        identifier = new URL(identifier).pathname.split('/').filter(Boolean).at(-1) ?? ''
+      } catch {
+        notify({ kind: 'error', text: 'The QR code does not contain a valid equipment identifier.' })
+        setScanning(false)
+        return
+      }
+    }
+    const scannedItem = items.find((item) => item.id === identifier || item.asset_tag === identifier)
+    if (!scannedItem) {
+      notify({ kind: 'error', text: 'No inventory item matches this QR code.' })
+      return
+    }
+    const isEligible = action === 'stock'
+      ? scannedItem.tracking_type === 'stock'
+      : scannedItem.tracking_type === 'asset' && (action === 'return' ? scannedItem.status === 'assigned' : scannedItem.status === 'available')
+    if (!isEligible) {
+      notify({ kind: 'error', text: `${scannedItem.name} cannot be used for ${action === 'return' ? 'return' : action === 'stock' ? 'this stock movement' : 'checkout'} while its status is ${statusLabel[scannedItem.status].toLowerCase()}.` })
+      return
+    }
+    setSelected(scannedItem.id)
+    setScanning(false)
+    notify({ kind: 'success', text: `${scannedItem.name} selected for ${action}.` })
+  }, [action, items, notify])
+  const handleScannerError = useCallback((message: string) => {
+    notify({ kind: 'error', text: message })
+  }, [notify])
   const loadPendingTransfers = useCallback(async () => {
     if (!supabase) return
     const { data, error } = await supabase.from('equipment_transfers')
@@ -464,12 +528,12 @@ function TransactionsPage({ items, profile, notify, onRefresh }: { items: Invent
     const chosenItem = itemChoices.find((item) => item.id === selected)
     const destinationName = locations.find((location) => location.id === destination)?.name
     const actionName = action === 'checkout' ? 'check out' : action === 'return' ? 'return' : action === 'transfer' ? 'transfer' : 'record a stock movement for'
-    const detail = action === 'checkout' ? `Recipient: ${employee}\nProject: ${project}` : action === 'transfer' ? `Receiver: ${employee}\nDestination: ${destinationName ?? 'not selected'}` : action === 'return' ? `Return condition: ${condition.replaceAll('_', ' ')}` : `Movement: ${stockAction.replaceAll('_', ' ')}\nQuantity: ${quantity}`
+    const detail = action === 'checkout' ? `Borrower: ${employee}\nContact: ${borrowerContact || 'Not provided'}` : action === 'transfer' ? `Receiver: ${employee}\nDestination: ${destinationName ?? 'not selected'}` : action === 'return' ? `Current borrower: ${chosenItem?.active_assignment?.employee_name ?? 'Not recorded'}\nReturn condition: ${condition.replaceAll('_', ' ')}` : `Movement: ${stockAction.replaceAll('_', ' ')}\nQuantity: ${quantity}`
     if (!window.confirm(`Confirm ${actionName} ${chosenItem?.name ?? 'this item'}?\n${detail}`)) return
     setBusy(true)
     let error: { message: string } | null = null
     if (action === 'checkout') {
-      const result = await supabase.rpc('checkout_asset', { p_item_id: selected, p_employee_name: employee.trim(), p_project_name: project.trim(), p_expected_return_at: null, p_notes: null })
+      const result = await supabase.rpc('checkout_asset_to_borrower', { p_item_id: selected, p_borrower_name: employee.trim(), p_borrower_contact: borrowerContact.trim() || null, p_notes: null })
       error = result.error
     } else if (action === 'return') {
       const result = await supabase.rpc('return_asset', { p_item_id: selected, p_condition: condition, p_location_id: null, p_notes: null })
@@ -487,7 +551,7 @@ function TransactionsPage({ items, profile, notify, onRefresh }: { items: Invent
       notify({ kind: 'success', text: action === 'checkout' ? 'Equipment checked out successfully.' : action === 'return' ? 'Equipment returned successfully.' : action === 'transfer' ? 'Transfer started. The asset is now in transit.' : 'Stock movement recorded.' })
       setSelected('')
       setEmployee('')
-      setProject('')
+      setBorrowerContact('')
       setDestination('')
       onRefresh()
       void loadPendingTransfers()
@@ -506,12 +570,13 @@ function TransactionsPage({ items, profile, notify, onRefresh }: { items: Invent
       void loadPendingTransfers()
     }
   }
-  const switchAction = (next: typeof action) => { setAction(next); setSelected('') }
+  const switchAction = (next: typeof action) => { setAction(next); setSelected(''); setScanning(false) }
   return <>
     <PageHeading eyebrow="ACCOUNTABILITY" title="Transactions" description="Check equipment in and out, transfer assets between sites, and manage material quantities." />
-    <div className="transaction-layout"><div className="panel transaction-form-panel">{canOperateAssets || canOperateStock ? <><div className="transaction-tabs">{canOperateAssets && <><button className={action === 'checkout' ? 'selected' : ''} onClick={() => switchAction('checkout')}><ArrowUpRight size={16} /> Check out</button><button className={action === 'return' ? 'selected' : ''} onClick={() => switchAction('return')}><ArrowDownLeft size={16} /> Return</button><button className={action === 'transfer' ? 'selected' : ''} onClick={() => switchAction('transfer')}><ArrowLeftRight size={16} /> Transfer</button></>}{canOperateStock && <button className={action === 'stock' ? 'selected' : ''} onClick={() => switchAction('stock')}><Boxes size={16} /> Stock</button>}</div><form className="form-grid" onSubmit={(event) => void submit(event)}>
-      <label className="form-field full"><span>{action === 'stock' ? 'Bulk inventory item' : 'Equipment asset'} <b>*</b></span><select required value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Select an item...</option>{itemChoices.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.asset_tag ?? item.id.slice(0, 8)}</option>)}</select>{itemChoices.length === 0 && <small>No eligible {action === 'return' ? 'issued' : action === 'stock' ? 'bulk stock' : 'available'} items found.</small>}</label>
-      {action === 'checkout' && <><label className="form-field"><span>Received by <b>*</b></span><input required value={employee} onChange={(event) => setEmployee(event.target.value)} placeholder="Employee or contractor" /></label><label className="form-field"><span>Project / site <b>*</b></span><input required value={project} onChange={(event) => setProject(event.target.value)} placeholder="Existing active project name" /></label></>}
+    <div className="transaction-layout"><div className="panel transaction-form-panel">{canOperateAssets || canOperateStock ? <><div className="transaction-tabs">{canOperateAssets && <><button type="button" className={action === 'checkout' ? 'selected' : ''} onClick={() => switchAction('checkout')}><ArrowUpRight size={16} /> Check out</button><button type="button" className={action === 'return' ? 'selected' : ''} onClick={() => switchAction('return')}><ArrowDownLeft size={16} /> Return</button><button type="button" className={action === 'transfer' ? 'selected' : ''} onClick={() => switchAction('transfer')}><ArrowLeftRight size={16} /> Transfer</button></>}{canOperateStock && <button type="button" className={action === 'stock' ? 'selected' : ''} onClick={() => switchAction('stock')}><Boxes size={16} /> Stock</button>}</div><form className="form-grid" onSubmit={(event) => void submit(event)}>
+      <label className="form-field full"><span>{action === 'stock' ? 'Bulk inventory item' : 'Equipment asset'} <b>*</b></span><div className="scan-select-row"><select required value={selected} onChange={(event) => setSelected(event.target.value)}><option value="">Select an item...</option>{itemChoices.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.asset_tag ?? item.id.slice(0, 8)}</option>)}</select><button type="button" className="button button-secondary scan-select-button" onClick={() => setScanning((value) => !value)}><QrCode size={15} />{scanning ? 'Close scanner' : 'Scan QR'}</button></div>{itemChoices.length === 0 && <small>No eligible {action === 'return' ? 'issued' : action === 'stock' ? 'bulk stock' : 'available'} items found.</small>}</label>
+      {scanning && <div className="full transaction-scanner"><QrCamera id="qr-transaction-reader" onScan={handleQrScan} onError={handleScannerError} /></div>}
+      {action === 'checkout' && <><label className="form-field"><span>Borrower name <b>*</b></span><input required value={employee} onChange={(event) => setEmployee(event.target.value)} placeholder="Person borrowing equipment" /></label><label className="form-field"><span>Borrower phone or contact</span><input value={borrowerContact} onChange={(event) => setBorrowerContact(event.target.value)} placeholder="Optional phone number or contact" /></label></>}
       {action === 'transfer' && <><label className="form-field"><span>Receiving location <b>*</b></span><select required value={destination} onChange={(event) => setDestination(event.target.value)}><option value="">Select destination...</option>{locations.map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}</select></label><label className="form-field"><span>Receiver name <b>*</b></span><input required value={employee} onChange={(event) => setEmployee(event.target.value)} placeholder="Person accepting delivery" /></label></>}
       {action === 'return' && <label className="form-field full"><span>Condition on return</span><select value={condition} onChange={(event) => setCondition(event.target.value)}><option value="good">Good — available for use</option><option value="fair">Fair — hold for inspection</option><option value="poor">Poor — do not issue</option><option value="damaged">Damaged — do not issue</option><option value="missing_parts">Missing parts — do not issue</option></select></label>}
       {action === 'stock' && <><label className="form-field"><span>Movement type</span><select value={stockAction} onChange={(event) => setStockAction(event.target.value as typeof stockAction)}><option value="stock_issue">Issue / consume</option><option value="stock_receipt">Receive stock</option><option value="stock_adjustment">Set counted balance</option></select></label><label className="form-field"><span>{stockAction === 'stock_adjustment' ? 'New counted balance' : 'Quantity'} <b>*</b></span><input type="number" min={stockAction === 'stock_adjustment' ? '0' : '0.001'} step="0.001" required value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label></>}
