@@ -37,7 +37,7 @@ export type Database = {
       user_profiles: TableShape<Profile>
       equipment_categories: TableShape<{ id: string; name: string }>
       inventory_locations: TableShape<{ id: string; name: string; location_type: string; active: boolean }>
-      construction_projects: TableShape<{ id: string; name: string; code: string }>
+      construction_projects: TableShape<{ id: string; name: string; code: string; active: boolean }>
       inventory_items: TableShape<{
         id: string
         name: string
@@ -48,9 +48,15 @@ export type Database = {
         quantity: number
         unit: string | null
         purchase_cost: number | null
+        purchase_date: string | null
+        warranty_expires_on: string | null
+        brand: string | null
+        model: string | null
+        description: string | null
         minimum_stock: number
         category_id: string | null
         location_id: string | null
+        project_id: string | null
         created_at: string
         updated_at: string
       }>

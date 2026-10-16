@@ -264,7 +264,7 @@ function App() {
         </div>
       </main>
 
-      {showNewItem && <NewItemModal onClose={() => setShowNewItem(false)} onSaved={() => { setShowNewItem(false); void loadInventory() }} notify={notify} />}
+      {showNewItem && <NewItemModal onClose={() => setShowNewItem(false)} onSaved={() => { void loadInventory() }} notify={notify} />}
       {notice && <div className={`toast toast-${notice.kind}`} role="status"><span>{notice.kind === 'success' ? <Check size={17} /> : <CircleAlert size={17} />}</span>{notice.text}<button aria-label="Dismiss" onClick={() => setNotice(null)}><X size={15} /></button></div>}
     </div>
   )
@@ -617,24 +617,49 @@ function SettingsPage({ profile, configured }: { profile: Profile | null; config
   return <><PageHeading eyebrow="WORKSPACE" title="Settings" description="Review your account and workspace connection." /><div className="settings-grid"><div className="panel settings-card"><div className="settings-card-head"><span className="settings-icon"><ShieldCheck size={18} /></span><div><h2>Account access</h2><p>Identity and permission scope</p></div></div><div className="settings-row"><span>Signed-in user</span><strong>{profile?.full_name ?? (configured ? 'Not loaded' : 'Not connected')}</strong></div><div className="settings-row"><span>Assigned role</span><strong className="role-chip">{profile?.role?.replaceAll('_', ' ') ?? '—'}</strong></div><div className="settings-row"><span>Authorization</span><strong>{configured ? 'Supabase Auth + database RLS' : 'Not configured'}</strong></div></div><div className="panel settings-card"><div className="settings-card-head"><span className="settings-icon"><Building2 size={18} /></span><div><h2>Database connection</h2><p>Secure backend configuration</p></div></div><div className="connection-status"><span className={configured ? 'connection-dot connected' : 'connection-dot'} />{configured ? 'Supabase client configured' : 'Waiting for environment variables'}</div><p className="settings-help">Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in <code>.env.local</code>. Never put a service-role key in frontend configuration.</p></div></div></>
 }
 
+type NewInventoryQr = { id: string; name: string; asset_tag: string | null; tracking_type: 'asset' | 'stock' }
+
 function NewItemModal({ onClose, onSaved, notify }: { onClose: () => void; onSaved: () => void; notify: (notice: Notice) => void }) {
   const [tracking, setTracking] = useState<'asset' | 'stock'>('asset')
   const [name, setName] = useState('')
   const [assetTag, setAssetTag] = useState('')
+  const [serialNumber, setSerialNumber] = useState('')
+  const [brand, setBrand] = useState('')
+  const [model, setModel] = useState('')
+  const [description, setDescription] = useState('')
   const [category, setCategory] = useState('')
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([])
+  const [location, setLocation] = useState('')
+  const [locations, setLocations] = useState<{ id: string; name: string }[]>([])
+  const [project, setProject] = useState('')
+  const [projects, setProjects] = useState<{ id: string; name: string }[]>([])
   const [quantity, setQuantity] = useState('1')
   const [minimumStock, setMinimumStock] = useState('0')
   const [unit, setUnit] = useState('unit')
   const [cost, setCost] = useState('')
+  const [purchaseDate, setPurchaseDate] = useState('')
+  const [warrantyDate, setWarrantyDate] = useState('')
+  const [createdItem, setCreatedItem] = useState<NewInventoryQr | null>(null)
   const [busy, setBusy] = useState(false)
+
   useEffect(() => {
     if (!supabase) return
-    void supabase.from('equipment_categories').select('id, name').order('name').then(({ data, error }) => {
+    let alive = true
+    void Promise.all([
+      supabase.from('equipment_categories').select('id, name').order('name'),
+      supabase.from('inventory_locations').select('id, name').eq('active', true).order('name'),
+      supabase.from('construction_projects').select('id, name').eq('active', true).order('name'),
+    ]).then(([categoryResult, locationResult, projectResult]) => {
+      if (!alive) return
+      const error = categoryResult.error ?? locationResult.error ?? projectResult.error
       if (error) notify({ kind: 'error', text: error.message })
-      else setCategories(data ?? [])
+      if (categoryResult.data) setCategories(categoryResult.data)
+      if (locationResult.data) setLocations(locationResult.data)
+      if (projectResult.data) setProjects(projectResult.data)
     })
+    return () => { alive = false }
   }, [notify])
+
   async function submit(event: React.FormEvent) {
     event.preventDefault()
     if (!supabase) {
@@ -642,25 +667,65 @@ function NewItemModal({ onClose, onSaved, notify }: { onClose: () => void; onSav
       return
     }
     setBusy(true)
-    const { error } = await supabase.from('inventory_items').insert({
+    const { data, error } = await supabase.from('inventory_items').insert({
       name: name.trim(),
       tracking_type: tracking,
       asset_tag: assetTag.trim() || null,
+      serial_number: tracking === 'asset' ? serialNumber.trim() || null : null,
+      brand: tracking === 'asset' ? brand.trim() || null : null,
+      model: tracking === 'asset' ? model.trim() || null : null,
+      description: description.trim() || null,
       status: 'available',
       quantity: tracking === 'stock' ? Number(quantity) : 1,
-      unit: tracking === 'stock' ? unit : 'unit',
+      unit: tracking === 'stock' ? unit.trim() || 'unit' : 'unit',
       minimum_stock: tracking === 'stock' ? Number(minimumStock) : 0,
       purchase_cost: cost ? Number(cost) : null,
-      category_id: category.trim() || null,
-    })
+      purchase_date: purchaseDate || null,
+      warranty_expires_on: warrantyDate || null,
+      category_id: category || null,
+      location_id: location || null,
+      project_id: project || null,
+    }).select('id, name, asset_tag, tracking_type').single()
     setBusy(false)
     if (error) notify({ kind: 'error', text: error.message })
     else {
-      notify({ kind: 'success', text: 'Inventory item registered.' })
+      notify({ kind: 'success', text: 'Inventory item registered. Its unique QR label is ready to print.' })
       onSaved()
+      setCreatedItem(data)
     }
   }
-  return <Modal title="Add inventory" subtitle="Register equipment or bulk materials to your inventory." onClose={onClose}><form className="form-grid modal-form" onSubmit={(event) => void submit(event)}><label className="form-field full"><span>Item name <b>*</b></span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. 5kW portable generator" autoFocus /></label><label className="form-field"><span>Tracking method</span><select value={tracking} onChange={(event) => setTracking(event.target.value as 'asset' | 'stock')}><option value="asset">Individual asset</option><option value="stock">Quantity-based stock</option></select></label><label className="form-field"><span>Asset tag</span><input value={assetTag} onChange={(event) => setAssetTag(event.target.value)} placeholder="e.g. GEN-0248" /></label><label className="form-field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Uncategorized</option>{categories.map((entry) => <option value={entry.id} key={entry.id}>{entry.name}</option>)}</select></label>{tracking === 'stock' && <><label className="form-field"><span>Initial quantity <b>*</b></span><input type="number" min="0" step="0.001" required value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label><label className="form-field"><span>Unit of measurement</span><input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="e.g. bag, kg, box" /></label><label className="form-field"><span>Low-stock threshold</span><input type="number" min="0" step="0.001" value={minimumStock} onChange={(event) => setMinimumStock(event.target.value)} /></label></>}<label className="form-field full"><span>Purchase cost (optional)</span><input type="number" min="0" step="0.01" value={cost} onChange={(event) => setCost(event.target.value)} placeholder="0.00" /></label><div className="form-note full"><QrCode size={16} /><span>Each inventory record gets a unique QR identity that can be printed from the inventory list.</span></div><div className="full modal-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy || !supabase}>{busy ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}Register item</button></div></form></Modal>
+
+  if (createdItem) {
+    return <Modal title="Item registered" subtitle="This QR code belongs to this inventory record only." onClose={onClose}>
+      <div className="qr-print-card">
+        <div className="qr-company">ASIA BEST CONSTRUCTION AND DEVELOPMENT CORPORATION</div>
+        <Suspense fallback={<LoadingState />}><QRCodeSVG value={`${window.location.origin}/inventory/${createdItem.id}`} size={220} level="M" /></Suspense>
+        <strong>{createdItem.name}</strong>
+        <span>{createdItem.asset_tag ?? createdItem.id}</span>
+        <small>{createdItem.tracking_type === 'stock' ? 'STOCK ITEM' : 'EQUIPMENT ASSET'}</small>
+        <div className="qr-modal-actions"><button className="button button-secondary" onClick={() => setCreatedItem(null)}>Add another item</button><button className="button button-primary print-button" onClick={() => window.print()}><QrCode size={15} /> Print QR label</button></div>
+      </div>
+    </Modal>
+  }
+
+  return <Modal title="Add inventory" subtitle="Register equipment or bulk materials to your inventory." onClose={onClose}>
+    <form className="form-grid modal-form" onSubmit={(event) => void submit(event)}>
+      <label className="form-field full"><span>Item name <b>*</b></span><input required value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. 5kW portable generator" autoFocus /></label>
+      <label className="form-field"><span>Tracking method</span><select value={tracking} onChange={(event) => setTracking(event.target.value as 'asset' | 'stock')}><option value="asset">Individual asset</option><option value="stock">Quantity-based stock</option></select></label>
+      <label className="form-field"><span>Asset tag</span><input value={assetTag} onChange={(event) => setAssetTag(event.target.value)} placeholder="e.g. GEN-0248" /></label>
+      <label className="form-field"><span>Category</span><select value={category} onChange={(event) => setCategory(event.target.value)}><option value="">Uncategorized</option>{categories.map((entry) => <option value={entry.id} key={entry.id}>{entry.name}</option>)}</select></label>
+      {tracking === 'asset' && <><label className="form-field"><span>Serial number</span><input value={serialNumber} onChange={(event) => setSerialNumber(event.target.value)} /></label><label className="form-field"><span>Brand</span><input value={brand} onChange={(event) => setBrand(event.target.value)} placeholder="Manufacturer" /></label><label className="form-field"><span>Model</span><input value={model} onChange={(event) => setModel(event.target.value)} /></label></>}
+      {tracking === 'stock' && <><label className="form-field"><span>Initial quantity <b>*</b></span><input type="number" min="0" step="0.001" required value={quantity} onChange={(event) => setQuantity(event.target.value)} /></label><label className="form-field"><span>Unit of measurement</span><input value={unit} onChange={(event) => setUnit(event.target.value)} placeholder="e.g. bag, kg, box" /></label><label className="form-field"><span>Low-stock threshold</span><input type="number" min="0" step="0.001" value={minimumStock} onChange={(event) => setMinimumStock(event.target.value)} /></label></>}
+      <label className="form-field"><span>Current location</span><select value={location} onChange={(event) => setLocation(event.target.value)}><option value="">Unassigned</option>{locations.map((entry) => <option value={entry.id} key={entry.id}>{entry.name}</option>)}</select></label>
+      <label className="form-field"><span>Construction project</span><select value={project} onChange={(event) => setProject(event.target.value)}><option value="">No project</option>{projects.map((entry) => <option value={entry.id} key={entry.id}>{entry.name}</option>)}</select></label>
+      <label className="form-field"><span>Purchase date</span><input type="date" value={purchaseDate} onChange={(event) => setPurchaseDate(event.target.value)} /></label>
+      <label className="form-field"><span>Warranty expiration</span><input type="date" value={warrantyDate} onChange={(event) => setWarrantyDate(event.target.value)} /></label>
+      <label className="form-field full"><span>Purchase cost (optional)</span><input type="number" min="0" step="0.01" value={cost} onChange={(event) => setCost(event.target.value)} placeholder="0.00" /></label>
+      <label className="form-field full"><span>Description / specifications</span><textarea rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Optional details about this item" /></label>
+      <div className="form-note full"><QrCode size={16} /><span>After saving, a QR code with this record’s unique inventory ID will be generated. Print one label per asset; stock items use one product QR.</span></div>
+      <div className="full modal-actions"><button type="button" className="button button-secondary" onClick={onClose}>Cancel</button><button className="button button-primary" disabled={busy || !supabase}>{busy ? <LoaderCircle className="spin" size={16} /> : <Plus size={16} />}Register item</button></div>
+    </form>
+  </Modal>
 }
 
 function Login({ onNotify, notice }: { onNotify: (notice: Notice) => void; notice: Notice | null }) {

@@ -22,7 +22,7 @@ The Equipment Tracker is a mobile-responsive construction inventory application 
 ## Included workflows
 
 - Supabase Auth sign-in and role-scoped inventory reads.
-- Inventory registration for individual assets and bulk stock, QR label generation/printing, table search/status filtering, and CSV export.
+- Inventory registration for individual assets and bulk stock, with an immediate per-record QR label preview/print flow; table search/status filtering and CSV export.
 - Rear-camera QR scanning with manual asset-tag fallback; camera access is requested only on the scanner screen.
 - Transactional equipment checkout/return, stock receipt/issue/adjustment, pending inter-location asset transfer/receipt, and maintenance status functions.
 - PostgreSQL checks, unique asset tags/serial numbers, active assignment uniqueness, non-negative stock balances, RLS, immutable movement rows, and protected audit history.
