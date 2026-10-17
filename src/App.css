@@ -420,5 +420,5 @@
   body * { visibility: hidden; }
   .qr-print-card,.qr-print-card * { visibility: visible; }
   .qr-print-card { position: absolute; inset: 0; justify-content: center; }
-  .modal-head,.print-button { display: none !important; }
+  .modal-head,.print-button,.qr-modal-actions { display: none !important; }
 }

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   ArrowDownLeft,
@@ -38,6 +38,47 @@ const QRCodeSVG = lazy(async () => ({ default: (await import('qrcode.react')).QR
 
 type Section = 'Overview' | 'Inventory' | 'Scan equipment' | 'Transactions' | 'Maintenance' | 'Reports' | 'Settings'
 type Notice = { kind: 'success' | 'error'; text: string }
+
+async function downloadQrPng(svg: SVGSVGElement, fileName: string) {
+  const svgUrl = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml;charset=utf-8' }))
+  try {
+    const image = new Image()
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve()
+      image.onerror = () => reject(new Error('The QR image could not be generated.'))
+      image.src = svgUrl
+    })
+
+    const size = svg.viewBox.baseVal.width || Number(svg.getAttribute('width'))
+    if (!size) throw new Error('The QR image has no valid dimensions.')
+
+    const canvas = document.createElement('canvas')
+    canvas.width = size * 3
+    canvas.height = size * 3
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('Your browser could not prepare the QR image for download.')
+    context.fillStyle = '#fff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+    context.drawImage(image, 0, 0, canvas.width, canvas.height)
+
+    const png = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The QR image could not be saved.')), 'image/png')
+    })
+    const pngUrl = URL.createObjectURL(png)
+    const link = document.createElement('a')
+    link.href = pngUrl
+    link.download = fileName
+    link.click()
+    window.setTimeout(() => URL.revokeObjectURL(pngUrl), 1000)
+  } finally {
+    URL.revokeObjectURL(svgUrl)
+  }
+}
+
+function qrFileName(name: string, assetTag: string | null) {
+  const baseName = (assetTag || name).trim().replace(/[<>:"/\\|?*]/g, '-')
+  return `${baseName || 'inventory-item'}-qr.png`
+}
 
 const navItems: { label: Section; icon: typeof LayoutDashboard }[] = [
   { label: 'Overview', icon: LayoutDashboard },
@@ -340,6 +381,20 @@ function LegendRow({ label, value, color, total }: { label: string; value: numbe
 function InventoryPage({ items, allItems, loading, search, setSearch, statusFilter, setStatusFilter, canManageInventory, onAdd, onRefresh, notify }: { items: InventoryItem[]; allItems: InventoryItem[]; loading: boolean; search: string; setSearch: (value: string) => void; statusFilter: string; setStatusFilter: (value: string) => void; canManageInventory: boolean; onAdd: () => void; onRefresh: () => void; notify: (notice: Notice) => void }) {
   const [itemForQr, setItemForQr] = useState<InventoryItem | null>(null)
   const [itemForHistory, setItemForHistory] = useState<InventoryItem | null>(null)
+  const qrCardRef = useRef<HTMLDivElement>(null)
+  const saveQrImage = async (name: string, assetTag: string | null) => {
+    const svg = qrCardRef.current?.querySelector('svg')
+    if (!svg) {
+      notify({ kind: 'error', text: 'The QR image is not ready yet. Please try again.' })
+      return
+    }
+    try {
+      await downloadQrPng(svg, qrFileName(name, assetTag))
+      notify({ kind: 'success', text: 'QR image downloaded.' })
+    } catch (error) {
+      notify({ kind: 'error', text: error instanceof Error ? error.message : 'The QR image could not be downloaded.' })
+    }
+  }
   const exportCsv = () => {
     const rows = [['Name', 'Asset tag', 'Category', 'Status', 'Location', 'Quantity', 'Unit'], ...items.map((item) => [item.name, item.asset_tag ?? '', item.category?.name ?? '', item.status, item.location?.name ?? '', String(item.quantity ?? 1), item.unit ?? ''])]
     const csv = rows.map((row) => row.map((cell) => `"${cell.replaceAll('"', '""')}"`).join(',')).join('\r\n')
@@ -358,7 +413,7 @@ function InventoryPage({ items, allItems, loading, search, setSearch, statusFilt
       <div className="table-toolbar"><label className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, tag, serial number..." /></label><div className="toolbar-right"><select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option>{Object.entries(statusLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><button className="icon-button filter-button" aria-label="Refresh inventory" onClick={onRefresh}><SlidersHorizontal size={16} /></button></div></div>
       {loading ? <LoadingState /> : items.length ? <InventoryTable items={items} onQr={setItemForQr} onHistory={setItemForHistory} /> : <EmptyState icon={Boxes} title={search || statusFilter !== 'all' ? 'No matching inventory' : 'No inventory registered'} description={search || statusFilter !== 'all' ? 'Try changing your search or status filter.' : 'Register an asset or connect your Supabase database to get started.'} action={!search && statusFilter === 'all' && canManageInventory ? <button className="button button-primary" onClick={onAdd}><Plus size={16} /> Add inventory</button> : undefined} />}
     </div>
-    {itemForQr && <Modal title="QR asset label" subtitle={itemForQr.name} onClose={() => setItemForQr(null)}><div className="qr-print-card"><Suspense fallback={<LoadingState />}><QRCodeSVG value={`${window.location.origin}/inventory/${itemForQr.id}`} size={190} level="M" /></Suspense><strong>{itemForQr.name}</strong><span>{itemForQr.asset_tag ?? itemForQr.id}</span><button className="button button-primary print-button" onClick={() => window.print()}>Print label</button></div></Modal>}
+    {itemForQr && <Modal title="QR asset label" subtitle={itemForQr.name} onClose={() => setItemForQr(null)}><div className="qr-print-card" ref={qrCardRef}><Suspense fallback={<LoadingState />}><QRCodeSVG value={`${window.location.origin}/inventory/${itemForQr.id}`} size={190} level="M" /></Suspense><strong>{itemForQr.name}</strong><span>{itemForQr.asset_tag ?? itemForQr.id}</span><div className="qr-modal-actions"><button className="button button-secondary" onClick={() => void saveQrImage(itemForQr.name, itemForQr.asset_tag)}><Download size={15} /> Save QR as PNG</button><button className="button button-primary print-button" onClick={() => window.print()}>Print label</button></div></div></Modal>}
     {itemForHistory && <MovementHistoryModal item={itemForHistory} onClose={() => setItemForHistory(null)} />}
   </>
 }
@@ -707,6 +762,21 @@ function NewItemModal({ onClose, onSaved, notify }: { onClose: () => void; onSav
   const [warrantyDate, setWarrantyDate] = useState('')
   const [createdItem, setCreatedItem] = useState<NewInventoryQr | null>(null)
   const [busy, setBusy] = useState(false)
+  const qrCardRef = useRef<HTMLDivElement>(null)
+
+  const saveQrImage = async (item: NewInventoryQr) => {
+    const svg = qrCardRef.current?.querySelector('svg')
+    if (!svg) {
+      notify({ kind: 'error', text: 'The QR image is not ready yet. Please try again.' })
+      return
+    }
+    try {
+      await downloadQrPng(svg, qrFileName(item.name, item.asset_tag))
+      notify({ kind: 'success', text: 'QR image downloaded.' })
+    } catch (error) {
+      notify({ kind: 'error', text: error instanceof Error ? error.message : 'The QR image could not be downloaded.' })
+    }
+  }
 
   useEffect(() => {
     if (!supabase) return
@@ -763,13 +833,13 @@ function NewItemModal({ onClose, onSaved, notify }: { onClose: () => void; onSav
 
   if (createdItem) {
     return <Modal title="Item registered" subtitle="This QR code belongs to this inventory record only." onClose={onClose}>
-      <div className="qr-print-card">
+      <div className="qr-print-card" ref={qrCardRef}>
         <div className="qr-company">ASIA BEST CONSTRUCTION AND DEVELOPMENT CORPORATION</div>
         <Suspense fallback={<LoadingState />}><QRCodeSVG value={`${window.location.origin}/inventory/${createdItem.id}`} size={220} level="M" /></Suspense>
         <strong>{createdItem.name}</strong>
         <span>{createdItem.asset_tag ?? createdItem.id}</span>
         <small>{createdItem.tracking_type === 'stock' ? 'STOCK ITEM' : 'EQUIPMENT ASSET'}</small>
-        <div className="qr-modal-actions"><button className="button button-secondary" onClick={() => setCreatedItem(null)}>Add another item</button><button className="button button-primary print-button" onClick={() => window.print()}><QrCode size={15} /> Print QR label</button></div>
+        <div className="qr-modal-actions"><button className="button button-secondary" onClick={() => setCreatedItem(null)}>Add another item</button><button className="button button-secondary" onClick={() => void saveQrImage(createdItem)}><Download size={15} /> Save QR as PNG</button><button className="button button-primary print-button" onClick={() => window.print()}><QrCode size={15} /> Print QR label</button></div>
       </div>
     </Modal>
   }

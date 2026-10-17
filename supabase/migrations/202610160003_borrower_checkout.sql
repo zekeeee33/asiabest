@@ -13,6 +13,9 @@ as $$
     or (p_project_id is not null and public.can_access_project(p_project_id))
 $$;
 
+drop policy if exists "Users read borrower assignments in item scope"
+  on public.equipment_assignments;
+
 create policy "Users read borrower assignments in item scope"
   on public.equipment_assignments for select to authenticated
   using (
