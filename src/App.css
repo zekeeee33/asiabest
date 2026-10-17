@@ -287,6 +287,12 @@
 .qr-print-card > small { color: #a0a9b3; font-size: 8px; font-weight: 700; letter-spacing: 1px; }
 .qr-modal-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 .print-button { margin-top: 8px; }
+.bulk-qr-print { display: none; }
+.bulk-qr-labels { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8mm; }
+.bulk-qr-label { display: flex; min-height: 82mm; flex-direction: column; align-items: center; justify-content: center; gap: 3mm; padding: 5mm; border: 1px solid #d5dbe0; text-align: center; break-inside: avoid; page-break-inside: avoid; }
+.bulk-qr-label strong { max-width: 100%; color: #354453; font-size: 13px; overflow-wrap: anywhere; }
+.bulk-qr-label > span { color: #506072; font-size: 11px; font-weight: 700; }
+.bulk-qr-label > small { color: #84909e; font-size: 9px; }
 .toast { position: fixed; right: 24px; bottom: 22px; z-index: 30; display: flex; max-width: min(460px,calc(100vw - 32px)); align-items: center; gap: 10px; padding: 12px 13px; border: 1px solid #e5e9ed; border-radius: 8px; color: #586574; background: white; box-shadow: 0 9px 28px rgba(22,36,50,.16); font-size: 10px; animation: toast-in .2s ease; }
 .toast > span { display: grid; color: #559476; }.toast-error > span { color: #bc6464; }
 .toast button { display: grid; width: 22px; height: 22px; flex: 0 0 auto; place-items: center; margin-left: 3px; border: 0; color: #89939e; background: transparent; }
@@ -417,8 +423,16 @@
   .toast { right: 12px; bottom: 12px; }
 }
 @media print {
+  @page { size: A4; margin: 10mm; }
   body * { visibility: hidden; }
   .qr-print-card,.qr-print-card * { visibility: visible; }
   .qr-print-card { position: absolute; inset: 0; justify-content: center; }
   .modal-head,.print-button,.qr-modal-actions { display: none !important; }
+  body.printing-qr-labels * { visibility: hidden !important; }
+  body.printing-qr-labels .bulk-qr-print,
+  body.printing-qr-labels .bulk-qr-print * { visibility: visible !important; }
+  body.printing-qr-labels > #root { display: none !important; }
+  body.printing-qr-labels .bulk-qr-print { display: block !important; position: static; }
+  body.printing-qr-labels .bulk-qr-labels { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8mm; }
+  body.printing-qr-labels .bulk-qr-label { min-height: 82mm; }
 }

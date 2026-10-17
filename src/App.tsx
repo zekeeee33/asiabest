@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Activity,
   ArrowDownLeft,
@@ -378,9 +379,47 @@ function LegendRow({ label, value, color, total }: { label: string; value: numbe
   return <div className="legend-row"><span><i className={`legend-dot ${color}`} />{label}</span><strong>{value}<small>{total ? ` · ${Math.round(value / total * 100)}%` : ''}</small></strong></div>
 }
 
+function BulkQrPrintLabels({ items, onClose }: { items: InventoryItem[]; onClose: () => void }) {
+  useEffect(() => {
+    const cleanup = () => {
+      document.body.classList.remove('printing-qr-labels')
+      onClose()
+    }
+    const handleAfterPrint = () => cleanup()
+
+    document.body.classList.add('printing-qr-labels')
+    window.addEventListener('afterprint', handleAfterPrint)
+    const frame = window.requestAnimationFrame(() => window.print())
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.removeEventListener('afterprint', handleAfterPrint)
+      document.body.classList.remove('printing-qr-labels')
+    }
+  }, [onClose])
+
+  return createPortal(
+    <div className="bulk-qr-print" aria-label="Printable QR labels">
+      <div className="bulk-qr-labels">
+        {items.map((item) => (
+          <article className="bulk-qr-label" key={item.id}>
+            <div className="qr-company">ASIA BEST CONSTRUCTION AND DEVELOPMENT CORPORATION</div>
+            <QRCodeSVG value={`${window.location.origin}/inventory/${item.id}`} size={160} level="M" />
+            <strong>{item.name}</strong>
+            <span>{item.asset_tag ?? item.id}</span>
+            <small>{[item.category?.name, item.location?.name ?? 'Unassigned'].filter(Boolean).join(' · ')}</small>
+          </article>
+        ))}
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 function InventoryPage({ items, allItems, loading, search, setSearch, statusFilter, setStatusFilter, canManageInventory, onAdd, onRefresh, notify }: { items: InventoryItem[]; allItems: InventoryItem[]; loading: boolean; search: string; setSearch: (value: string) => void; statusFilter: string; setStatusFilter: (value: string) => void; canManageInventory: boolean; onAdd: () => void; onRefresh: () => void; notify: (notice: Notice) => void }) {
   const [itemForQr, setItemForQr] = useState<InventoryItem | null>(null)
   const [itemForHistory, setItemForHistory] = useState<InventoryItem | null>(null)
+  const [printingAllLabels, setPrintingAllLabels] = useState(false)
   const qrCardRef = useRef<HTMLDivElement>(null)
   const saveQrImage = async (name: string, assetTag: string | null) => {
     const svg = qrCardRef.current?.querySelector('svg')
@@ -407,7 +446,7 @@ function InventoryPage({ items, allItems, loading, search, setSearch, statusFilt
     notify({ kind: 'success', text: 'Inventory CSV exported.' })
   }
   return <>
-    <PageHeading eyebrow="ASSET REGISTER" title="Inventory" description="Keep track of every tool, machine, and material in your operation." action={<><button className="button button-secondary" onClick={exportCsv}><Download size={16} /> Export</button>{canManageInventory && <button className="button button-primary" onClick={onAdd}><Plus size={17} /> Add inventory</button>}</>} />
+    <PageHeading eyebrow="ASSET REGISTER" title="Inventory" description="Keep track of every tool, machine, and material in your operation." action={<><button className="button button-secondary" onClick={exportCsv}><Download size={16} /> Export</button><button className="button button-secondary" disabled={loading || allItems.length === 0} onClick={() => setPrintingAllLabels(true)}><QrCode size={16} /> Download all QR labels</button>{canManageInventory && <button className="button button-primary" onClick={onAdd}><Plus size={17} /> Add inventory</button>}</>} />
     <div className="inventory-summary-row"><div><strong>{allItems.length.toLocaleString()}</strong><span> total records</span></div><div className="inventory-summary-chips"><span><i className="legend-dot green" />{allItems.filter((item) => item.status === 'available').length} available</span><span><i className="legend-dot blue" />{allItems.filter((item) => item.status === 'assigned').length} in use</span><span><i className="legend-dot orange" />{allItems.filter((item) => item.status === 'maintenance' || item.status === 'damaged').length} needs attention</span></div></div>
     <div className="panel inventory-panel">
       <div className="table-toolbar"><label className="search-field"><Search size={16} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search name, tag, serial number..." /></label><div className="toolbar-right"><select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">All statuses</option>{Object.entries(statusLabel).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><button className="icon-button filter-button" aria-label="Refresh inventory" onClick={onRefresh}><SlidersHorizontal size={16} /></button></div></div>
@@ -415,6 +454,7 @@ function InventoryPage({ items, allItems, loading, search, setSearch, statusFilt
     </div>
     {itemForQr && <Modal title="QR asset label" subtitle={itemForQr.name} onClose={() => setItemForQr(null)}><div className="qr-print-card" ref={qrCardRef}><Suspense fallback={<LoadingState />}><QRCodeSVG value={`${window.location.origin}/inventory/${itemForQr.id}`} size={190} level="M" /></Suspense><strong>{itemForQr.name}</strong><span>{itemForQr.asset_tag ?? itemForQr.id}</span><div className="qr-modal-actions"><button className="button button-secondary" onClick={() => void saveQrImage(itemForQr.name, itemForQr.asset_tag)}><Download size={15} /> Save QR as PNG</button><button className="button button-primary print-button" onClick={() => window.print()}>Print label</button></div></div></Modal>}
     {itemForHistory && <MovementHistoryModal item={itemForHistory} onClose={() => setItemForHistory(null)} />}
+    {printingAllLabels && <Suspense fallback={<LoadingState />}><BulkQrPrintLabels items={allItems} onClose={() => setPrintingAllLabels(false)} /></Suspense>}
   </>
 }
 
